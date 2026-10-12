@@ -1,0 +1,19 @@
+load("@rules_java//java:java_binary.bzl", "java_binary")
+
+java_binary(
+    name = "java_api",
+    srcs = glob(["src/main/java/**/*.java"]),
+    main_class = "com.example.javaapi.Application",
+    resources = ["src/main/resources/application.properties"],
+    resource_strip_prefix = "java_api/src/main/resources",
+    # Direct compile-time deps (Bazel enforces strict deps).
+    deps = [
+        "@maven//:org_springframework_boot_spring_boot",
+        "@maven//:org_springframework_boot_spring_boot_autoconfigure",
+        "@maven//:org_springframework_spring_web",
+    ],
+    # The starter brings embedded Tomcat, Jackson, etc. at runtime.
+    runtime_deps = [
+        "@maven//:org_springframework_boot_spring_boot_starter_webmvc",
+    ],
+)

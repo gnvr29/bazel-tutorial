@@ -1,0 +1,11 @@
+# Hermetic JDK 21 for compiling and running Java targets.
+common --java_language_version=21
+common --java_runtime_version=remotejdk_21
+common --tool_java_language_version=21
+common --tool_java_runtime_version=remotejdk_21
+
+# Opt into the future rules_python default (no auto-generated __init__.py files).
+common --incompatible_default_to_explicit_init_py
+
+# Optional, machine-specific overrides (e.g. corporate proxy CA). Not committed.
+try-import %workspace%/user.bazelrc

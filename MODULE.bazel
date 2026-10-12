@@ -1,0 +1,45 @@
+"""Monorepo demonstrating a Java (Spring Boot) and a Python (FastAPI) service built with Bazel."""
+
+module(
+    name = "microservices_monorepo",
+    version = "0.1.0",
+)
+
+bazel_dep(name = "rules_java", version = "9.9.0")
+bazel_dep(name = "rules_jvm_external", version = "7.2")
+bazel_dep(name = "rules_python", version = "2.4.2")
+
+# ---------------------------------------------------------------------------
+# Java: Maven dependencies (Spring Boot)
+# ---------------------------------------------------------------------------
+maven = use_extension("@rules_jvm_external//:extensions.bzl", "maven")
+maven.install(
+    artifacts = [
+        "org.springframework.boot:spring-boot-starter-webmvc:4.1.1",
+    ],
+    fail_if_repin_required = True,
+    known_contributing_modules = ["protobuf"],
+    # Regenerate with: REPIN=1 bazel run @maven//:pin
+    lock_file = "//:maven_install.json",
+    repositories = ["https://repo1.maven.org/maven2"],
+)
+use_repo(maven, "maven")
+
+# ---------------------------------------------------------------------------
+# Python: hermetic interpreter + pip dependencies (FastAPI)
+# ---------------------------------------------------------------------------
+PYTHON_VERSION = "3.12"
+
+python = use_extension("@rules_python//python/extensions:python.bzl", "python")
+python.toolchain(
+    is_default = True,
+    python_version = PYTHON_VERSION,
+)
+
+pip = use_extension("@rules_python//python/extensions:pip.bzl", "pip")
+pip.parse(
+    hub_name = "pypi",
+    python_version = PYTHON_VERSION,
+    requirements_lock = "//python_api:requirements_lock.txt",
+)
+use_repo(pip, "pypi")
