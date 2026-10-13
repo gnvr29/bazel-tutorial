@@ -577,131 +577,16 @@ layout: section
 
 Um monorepo com **dois microsserviços** em linguagens diferentes, construídos pelo mesmo Bazel.
 
-| Serviço | Stack | Endpoint | Porta |
-|---|---|---|---|
-| `//java_api` | Java 21, Spring Boot 4.1 | `GET /api/java/status` | 8080 |
-| `//python_api` | Python 3.12, FastAPI | `GET /api/python/status` | 8000 |
-
-```text
-.
-├── MODULE.bazel           # rules_java, rules_jvm_external, rules_python
-├── MODULE.bazel.lock      # resolução fixada
-├── maven_install.json     # deps Maven fixadas
-├── .bazelrc / .bazelversion (9.3.0)
-├── java_api/BUILD.bazel   # java_binary
-└── python_api/BUILD.bazel # py_binary + requirements_lock.txt
-```
+| Serviço | Stack | Endpoint |
+|---|---|---|
+| `//java_api` | Java 21, Spring Boot | `GET /api/java/status` |
+| `//python_api` | Python 3.12, FastAPI | `GET /api/python/status` |
 
 <v-click>
 
-Nenhum JDK ou Python local é necessário: o Bazel baixa as toolchains.
+Nenhum JDK ou Python instalado na máquina: o Bazel baixa as toolchains.
 
 </v-click>
-
----
-
-# `MODULE.bazel` do projeto
-
-```python {all|6-9|11-22|24-31|33-39}{maxHeight:'420px'}
-module(
-    name = "microservices_monorepo",
-    version = "0.1.0",
-)
-
-# Regras de cada linguagem, vindas do Bazel Central Registry
-bazel_dep(name = "rules_java", version = "9.9.0")
-bazel_dep(name = "rules_jvm_external", version = "7.2")
-bazel_dep(name = "rules_python", version = "2.4.2")
-
-# Java: dependências Maven (Spring Boot)
-maven = use_extension("@rules_jvm_external//:extensions.bzl", "maven")
-maven.install(
-    artifacts = [
-        "org.springframework.boot:spring-boot-starter-webmvc:4.1.1",
-    ],
-    fail_if_repin_required = True,
-    known_contributing_modules = ["protobuf"],
-    lock_file = "//:maven_install.json",
-    repositories = ["https://repo1.maven.org/maven2"],
-)
-use_repo(maven, "maven")
-
-# Python: interpretador hermético + dependências pip (FastAPI)
-PYTHON_VERSION = "3.12"
-
-python = use_extension("@rules_python//python/extensions:python.bzl", "python")
-python.toolchain(
-    is_default = True,
-    python_version = PYTHON_VERSION,
-)
-
-pip = use_extension("@rules_python//python/extensions:pip.bzl", "pip")
-pip.parse(
-    hub_name = "pypi",
-    python_version = PYTHON_VERSION,
-    requirements_lock = "//python_api:requirements_lock.txt",
-)
-use_repo(pip, "pypi")
-```
-
----
-
-# Os arquivos `BUILD`
-
-<div class="grid grid-cols-2 gap-4">
-<div>
-
-```python
-# java_api/BUILD.bazel
-load("@rules_java//java:java_binary.bzl",
-     "java_binary")
-
-java_binary(
-    name = "java_api",
-    srcs = glob(["src/main/java/**/*.java"]),
-    main_class = "com.example.javaapi.Application",
-    resources = [
-        "src/main/resources/application.properties",
-    ],
-    resource_strip_prefix = "java_api/src/main/resources",
-    deps = [
-        "@maven//:org_springframework_boot_spring_boot",
-        "@maven//:org_springframework_boot_spring_boot_autoconfigure",
-        "@maven//:org_springframework_spring_web",
-    ],
-    runtime_deps = [
-        "@maven//:org_springframework_boot_spring_boot_starter_webmvc",
-    ],
-)
-```
-
-</div>
-<div>
-
-```python
-# python_api/BUILD.bazel
-load("@rules_python//python:py_binary.bzl",
-     "py_binary")
-
-py_binary(
-    name = "python_api",
-    srcs = ["main.py"],
-    main = "main.py",
-    deps = [
-        "@pypi//fastapi",
-        "@pypi//uvicorn",
-    ],
-)
-```
-
-```bash
-# .bazelrc: JDK 21 hermético
-common --java_runtime_version=remotejdk_21
-try-import %workspace%/user.bazelrc
-```
-
-</div>
-</div>
 
 ---
 
@@ -712,103 +597,29 @@ try-import %workspace%/user.bazelrc
 1. **Estrutura**: `MODULE.bazel`, `BUILD` e o código-fonte
 2. **Build**: `bazel build //...` e o artefato em `bazel-bin/`
 3. **Cache**: rodar de novo e comparar o tempo
-4. **Incremental**: alterar `StatusController.java` e reconstruir
-5. **Grafo**: `bazel query` nas dependências
-6. **Executar**: `bazel run` e `curl` nos endpoints
+4. **Incremental**: alterar um arquivo e reconstruir
+5. **Executar**: `bazel run` e `curl` nos endpoints
 
 </v-clicks>
 
----
+<!--
+Comandos de apoio:
 
-# 1–3. Build, artefato e cache
-
-```bash
-# Primeiro build (dependências já baixadas antes da apresentação)
 bazel build //...
+ls -lh bazel-bin/java_api/
+bazel build //java_api:java_api_deploy.jar   # jar único com todas as deps
+bazel build //...                            # null build, ver "N processes"
 
-# O artefato
-ls -lh bazel-bin/java_api/ bazel-bin/python_api/
+sed -i '' 's/"ok"/"ok, via Bazel"/' java_api/src/main/java/com/example/javaapi/StatusController.java
+bazel build //...                            # só o Java é refeito
+git checkout -- java_api/                    # desfazer depois
 
-# Jar único com todas as dependências, pronto para distribuir
-bazel build //java_api:java_api_deploy.jar
-ls -lh bazel-bin/java_api/java_api_deploy.jar
-
-# Null build: nada mudou, nada é refeito
-bazel build //...
-```
-
-<v-click>
-
-<div class="mt-4 p-4 rounded bg-blue-500/10 border-l-4 border-blue-500">
-
-Observe a linha `INFO: N processes` e o tempo total na segunda execução.
-
-</div>
-
-</v-click>
-
----
-
-# 4–5. Build incremental e grafo
-
-```bash
-# Mudar a resposta do endpoint Java
-sed -i '' 's/"ok"/"ok, via Bazel"/' \
-  java_api/src/main/java/com/example/javaapi/StatusController.java
-
-# Só as ações do Java são refeitas; o Python fica no cache
-bazel build //...
-# (depois da demo: git checkout -- java_api/)
-
-# Quem são os targets do repo?
 bazel query //...
-
-# Do que cada serviço depende diretamente?
-bazel query 'labels(deps, //python_api)'
-bazel query 'labels(deps, //java_api)'
-```
-
----
-
-# 6. Executando os serviços
-
-<div class="grid grid-cols-2 gap-4">
-<div>
-
-```bash
-# terminal 1
-bazel run //java_api
-```
-
-```bash
-# terminal 2
-bazel run //python_api
-```
-
-</div>
-<div>
-
-```bash
-# terminal 3
+bazel run //java_api        # terminal 1
+bazel run //python_api      # terminal 2
 curl http://127.0.0.1:8080/api/java/status
-# {"service":"java-api","status":"ok, via Bazel"}
-
 curl http://127.0.0.1:8000/api/python/status
-# {"service":"python-api","status":"ok"}
-```
-
-</div>
-</div>
-
-<v-click>
-
-<div class="mt-6 opacity-80 text-sm">
-
-Os serviços escutam só em `127.0.0.1` e não têm autenticação: é uma demo, não um setup de produção.
-
-</div>
-
-</v-click>
+-->
 
 ---
 layout: center
